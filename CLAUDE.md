@@ -77,6 +77,39 @@ Se o jogo estiver aberto com o mod carregado, a DLL fica bloqueada e a cópia fa
 - Teclas: **F9** liga/desliga. O painel não tem tecla própria, ele segue o quadro.
 - Seções do config: `Geral`, `Regras`, `Dinheiro`, `Painel` (PosicaoX/PosicaoY/Minimizado).
 
+## Valores padrão do config
+
+| Seção | Chave | Padrão | Faixa |
+|---|---|---|---|
+| Geral | `Ativado` | `true` | |
+| Geral | `TeclaLigaDesliga` | `F9` | |
+| Regras | `SegundosSemEstoque` | `20` | 1–3600 (slider: 1–300) |
+| Regras | `IntervaloDeVerificacao` | `1` | 0.25–60 (slider: 0.25–30) |
+| Regras | `LimiteDeUnidades` | `0` | 0–1000 (slider: 0–200) |
+| Regras | `CaixasPorPedido` | `1` | 1–50 (slider: 1–20) |
+| Regras | `IntervaloEntreComprasDoMesmoProduto` | `30` | 0–3600 (slider: 0–600) |
+| Regras | `ExigirPrateleiraVazia` | `false` | |
+| Regras | `SomenteComLojaAberta` | `false` | |
+| Dinheiro | `ReservaMinimaDeDinheiro` | `0` | slider: 0–20000 |
+| Dinheiro | `GastoMaximoPorDia` | `0` (sem limite) | slider: 0–50000 |
+| Painel | `PosicaoX` / `PosicaoY` | `-1` (posição padrão) | |
+| Painel | `Minimizado` | `false` | |
+
+## Histórico de decisões
+
+1. **v1.0.0** (`fbcda7d`): primeira versão. Configuração só pelo `.cfg`; F9 liga e desliga.
+2. **v1.1.0** (`693d1e0`): o usuário pediu opções dentro do jogo. Criei uma janela IMGUI que abria com **F10**, liberava o cursor e travava a câmera pela flag PlayMaker `InOptions`. Entraram também `LimiteDeUnidades`, `IntervaloDeVerificacao` e `GastoMaximoPorDia`.
+3. **v1.2.0** (`c1f2542`): o usuário pediu o painel **dentro do Quadro de Gestão**. A tecla F10 e o código de cursor/`InOptions` foram **removidos**. O painel agora segue `tabsOBJ` e pode ser minimizado e arrastado. Depois disso também saiu a referência a `PlayMaker.dll` do `.csproj`, que tinha ficado sem uso.
+4. Os caracteres especiais (✓ ✗ ● ○ •) foram trocados por ASCII (`[OK]`, `[X]`, `-`), porque a fonte padrão do IMGUI pode não ter esses glifos.
+5. Ao instalar a versão mais nova do `ilspycmd`, o SDK 8 deu erro de formato. Por isso foi fixada a versão **8.2.0.7535**.
+6. A `LICENSE` (MIT) está no nome do usuário, que é o mesmo do `git config user.name`.
+
+## O que foi instalado na máquina
+
+- **BepInEx 5.4.23.6 x64**, baixado das releases oficiais no GitHub (`BepInEx_win_x64_5.4.23.6.zip`) e copiado para a pasta do jogo.
+- **.NET SDK 8.0.428**, instalado via `dotnet-install.ps1` em `%LOCALAPPDATA%\Microsoft\dotnet`, só para o usuário e fora do PATH do sistema.
+- **ilspycmd 8.2.0.7535**, instalado como dotnet tool global em `%USERPROFILE%\.dotnet\tools`.
+
 ## Status e próximos passos
 
 - [ ] **Nada foi testado dentro do jogo ainda.** Quando o BepInEx foi instalado, o jogo já estava aberto, então é preciso reiniciá-lo. Depois, confira no `LogOutput.log`:
