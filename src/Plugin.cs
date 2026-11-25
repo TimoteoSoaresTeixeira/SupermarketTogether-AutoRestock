@@ -18,7 +18,7 @@ namespace AutoRestock
     {
         public const string PluginGuid = "com.autorestock.supermarkettogether";
         public const string PluginName = "AutoRestock";
-        public const string PluginVersion = "1.2.0";
+        public const string PluginVersion = "1.3.0";
 
         // Índices de ManagerBlackboard.dummyArrayExistences (mesma ordem usada pelo tablet do jogo).
         private const int ShelvesIndex = 0;
@@ -30,9 +30,6 @@ namespace AutoRestock
 
         internal ConfigEntry<bool> Enabled;
         internal ConfigEntry<KeyboardShortcut> ToggleKey;
-        internal ConfigEntry<float> PanelX;
-        internal ConfigEntry<float> PanelY;
-        internal ConfigEntry<bool> PanelMinimized;
         internal ConfigEntry<float> EmptySeconds;
         internal ConfigEntry<float> CheckInterval;
         internal ConfigEntry<int> StockThreshold;
@@ -70,25 +67,20 @@ namespace AutoRestock
         private float _nextCheck;
         private bool _inputBroken;
         private bool _loggedScanError;
-        private ConfigWindow _window;
+        private BoardTab _boardTab;
+        private bool _loggedTabError;
         private ManagerBlackboard _blackboard;
 
         private void Awake()
         {
             Log = Logger;
-            // Evita gravar o arquivo a cada movimento de slider; a janela salva ao fechar.
+            // Evita gravar o arquivo a cada clique; a aba salva quando é fechada.
             Config.SaveOnConfigSet = false;
 
             Enabled = Config.Bind("Geral", "Ativado", true,
                 "Liga/desliga a compra automática.");
             ToggleKey = Config.Bind("Geral", "TeclaLigaDesliga", new KeyboardShortcut(KeyCode.F9),
                 "Tecla para ligar/desligar durante o jogo.");
-            PanelX = Config.Bind("Painel", "PosicaoX", -1f,
-                "Posição horizontal do painel no Quadro de Gestão (-1 = canto direito).");
-            PanelY = Config.Bind("Painel", "PosicaoY", -1f,
-                "Posição vertical do painel no Quadro de Gestão (-1 = padrão).");
-            PanelMinimized = Config.Bind("Painel", "Minimizado", false,
-                "Se true, o painel aparece recolhido no Quadro de Gestão.");
             EmptySeconds = Config.Bind("Regras", "SegundosSemEstoque", 20f,
                 new ConfigDescription("Quantos segundos seguidos o produto precisa ficar abaixo do limite antes de comprar.",
                     new AcceptableValueRange<float>(1f, 3600f)));
@@ -114,15 +106,15 @@ namespace AutoRestock
             OnlyWhenStoreOpen = Config.Bind("Regras", "SomenteComLojaAberta", false,
                 "Se true, só compra enquanto a loja estiver aberta.");
 
-            _window = new ConfigWindow(this);
+            _boardTab = new BoardTab(this);
 
-            Log.LogInfo($"{PluginName} {PluginVersion} carregado. Painel no Quadro de Gestão | Liga/desliga: {ToggleKey.Value} | Ativado: {Enabled.Value}");
+            Log.LogInfo($"{PluginName} {PluginVersion} carregado. Aba 'Reposição' no Quadro de Gestão | Liga/desliga: {ToggleKey.Value} | Ativado: {Enabled.Value}");
         }
 
         private void Update()
         {
             HandleKeys();
-            _window.SetBoardOpen(IsBoardOpen());
+            TickBoardTab();
 
             if (Time.time < _nextCheck)
                 return;
@@ -144,31 +136,21 @@ namespace AutoRestock
             }
         }
 
-        private void OnGUI() => _window.OnGUI();
-
-        /// <summary>
-        /// O Quadro de Gestão está aberto quando as abas dele (ManagerBlackboard.tabsOBJ) estão ativas.
-        /// É o mesmo teste que o jogo usa para atualizar a lista de produtos do quadro.
-        /// </summary>
-        private bool IsBoardOpen()
+        private void TickBoardTab()
         {
             try
             {
-                if (_blackboard == null)
-                {
-                    if (GameData.Instance == null)
-                        return false;
+                if (_blackboard == null && GameData.Instance != null)
                     _blackboard = GameData.Instance.GetComponent<ManagerBlackboard>();
-                    if (_blackboard == null)
-                        return false;
-                }
-
-                GameObject tabs = _blackboard.tabsOBJ;
-                return tabs != null && tabs.activeInHierarchy;
+                _boardTab.Tick(_blackboard);
             }
-            catch
+            catch (Exception e)
             {
-                return false;
+                if (!_loggedTabError)
+                {
+                    _loggedTabError = true;
+                    Log.LogError($"Erro na aba do Quadro de Gestão: {e}");
+                }
             }
         }
 

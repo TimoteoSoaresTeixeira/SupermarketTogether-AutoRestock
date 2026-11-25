@@ -2,7 +2,7 @@
 
 Plugin **BepInEx 5** para o jogo **Supermarket Together** (Unity 2023.2, build **Mono**, rede com **Mirror**, UI com **PlayMaker**).
 Ele compra caixas sozinho quando um produto etiquetado fica sem estoque e sem caixas na loja por N segundos.
-O painel de opções aparece dentro do **Quadro de Gestão** do jogo.
+As opções ficam numa aba nativa (uGUI) **"Reposição"** dentro do **Quadro de Gestão** do jogo.
 
 - Idioma: o usuário fala **português (pt-BR)**. Responda e escreva textos de UI, logs e config em pt-BR.
 - O repositório vai para o GitHub. **Nunca** faça commit das DLLs do jogo ou do BepInEx (o `.gitignore` já bloqueia `*.dll`).
@@ -14,8 +14,8 @@ O painel de opções aparece dentro do **Quadro de Gestão** do jogo.
 README.md              Documentação para usuários (pt-BR)
 LICENSE                MIT
 src/AutoRestock.csproj netstandard2.1; referencia DLLs do jogo/BepInEx com Private=false; copia a DLL para BepInEx\plugins\AutoRestock após o build
-src/Plugin.cs          BaseUnityPlugin: config, varredura de estoque, lógica de compra, detecção do quadro aberto
-src/ConfigWindow.cs    Painel IMGUI (GUILayout.Window) exibido enquanto o Quadro de Gestão está aberto
+src/Plugin.cs          BaseUnityPlugin: config, varredura de estoque, lógica de compra
+src/BoardTab.cs        Aba "Reposição" no Quadro de Gestão, montada com clones de elementos do jogo (+ HoldRepeat)
 ```
 
 ## Ambiente local
@@ -57,7 +57,18 @@ Se o jogo estiver aberto com o mod carregado, a DLL fica bloqueada e a cópia fa
 - `BuyCargo()`: confere `GameData.gameFunds`, chama `CmdAddProductToSpawnList(id)` para cada caixa, depois `GameData.CmdAlterFunds(-total)` e `CmdmoneySpentOnProducts(total)`.
 - `public List<int> idsToSpawn` guarda as caixas pagas que ainda não apareceram (só existe no servidor). `SpawnRemainingCargoFromAutosave()` inicia o spawner se `isServer`.
 - `PricePerBoxRetrieve(int)` (privado) dá o preço da caixa, igual ao do tablet. O plugin chama via `AccessTools.MethodDelegate`.
-- `public GameObject tabsOBJ` fica ativo quando o quadro está aberto. É o teste que o plugin usa para mostrar o painel.
+- `public GameObject tabsOBJ` é o objeto `Tabs` do quadro (veja a hierarquia abaixo).
+
+**UI do Quadro de Gestão** (lida offline da cena `level1` com UnityPy; Canvas world-space `Canvas_Manager`, 1077x606):
+```
+Shared_Interactables/ManagerContainer/Canvas_Manager
+  Buttons_Bar/  Button_ProductOrder, Button_Supermarket, Button_Employees, Button_Statistics, Button_Invoices (220x60, x = -460..460, passo 230), CloseButton
+  Tabs/         ProductsOrder_Tab, Supermarket_Tab, Employees_Tab, Statistics_Tab, Invoices_Tab   (todas inativas por padrão)
+```
+- Cada botão de aba tem uma FSM (`UiButtonOnClickEvent`) que desliga **todos** os filhos de `Tabs` e liga o filho de índice `TabIndex` (variável Int da FSM).
+- O plugin cria `AutoRestock_Tab` como último filho de `Tabs` e clona `Button_Invoices` (num pai inativo, para ajustar `TabIndex` antes do Awake). Também redistribui os 6 botões na largura original. Se a FSM não abrir a aba, um listener próprio (`EnsureShown`) abre.
+- Peças clonadas de `Employees_Tab`: `RenewBCK` (título), `MaxEmployeesBCK` (linha com `MaxEmployees_Text` + `NumberBCK`), `EmployeesButtons/Button_HireEmployees` (botão) e `Separator`. Nos clones, `PlayMakerFSM` e `SetLocalizationString` são removidos com `DestroyImmediate`.
+- Para reinspecionar a cena: `pip install --user UnityPy` e carregar `Supermarket Together_Data\level1`. Os MonoBehaviours não têm typetree; dá para ver nomes de GameObject, RectTransforms e strings cruas das FSMs.
 
 **Outros:**
 - `ProductListing.Instance.availableProducts` lista os IDs desbloqueados. `productsData[id].maxItemsPerBox`, `.basePricePerUnit` e `.productTier` descrevem cada produto.
@@ -67,15 +78,15 @@ Se o jogo estiver aberto com o mod carregado, a DLL fica bloqueada e a cópia fa
 - O PlayMaker global `FsmVariables.GlobalVariables.FindFsmBool("InOptions")` trava a câmera (`CustomCameraController`).
 - Input: o jogo usa Rewired, mas o `UnityEngine.Input` legado está disponível. O plugin tem um fallback caso ele lance `InvalidOperationException`.
 
-## Comportamento atual (v1.2.0)
+## Comportamento atual (v1.3.0)
 
 - Só roda com `NetworkServer.active` (host ou single-player). Nos clientes fica inativo.
 - Considera apenas produtos com **etiqueta** (ID ≠ -1) em alguma prateleira ou no estoque.
 - Compra quando `estoque + caixas + caixasPendentes*maxItemsPerBox <= LimiteDeUnidades` por `SegundosSemEstoque` seguidos. Também respeita o cooldown por produto, `ReservaMinimaDeDinheiro` e `GastoMaximoPorDia` (o gasto do dia zera quando `gameDay` muda).
 - A compra não usa a lista de compras do tablet. Ela coloca os IDs em `idsToSpawn`, chama o spawner e depois os Cmds de dinheiro.
-- `Config.SaveOnConfigSet = false`. O `.cfg` é salvo quando o quadro fecha, ao ligar/desligar e ao restaurar os padrões.
-- Teclas: **F9** liga/desliga. O painel não tem tecla própria, ele segue o quadro.
-- Seções do config: `Geral`, `Regras`, `Dinheiro`, `Painel` (PosicaoX/PosicaoY/Minimizado).
+- `Config.SaveOnConfigSet = false`. O `.cfg` é salvo quando a aba deixa de estar visível, ao ligar/desligar e ao restaurar os padrões.
+- Teclas: **F9** liga/desliga.
+- Seções do config: `Geral`, `Regras`, `Dinheiro`. A seção `Painel` antiga (v1.2.0) não é mais usada.
 
 ## Valores padrão do config
 
@@ -83,17 +94,15 @@ Se o jogo estiver aberto com o mod carregado, a DLL fica bloqueada e a cópia fa
 |---|---|---|---|
 | Geral | `Ativado` | `true` | |
 | Geral | `TeclaLigaDesliga` | `F9` | |
-| Regras | `SegundosSemEstoque` | `20` | 1–3600 (slider: 1–300) |
-| Regras | `IntervaloDeVerificacao` | `1` | 0.25–60 (slider: 0.25–30) |
-| Regras | `LimiteDeUnidades` | `0` | 0–1000 (slider: 0–200) |
-| Regras | `CaixasPorPedido` | `1` | 1–50 (slider: 1–20) |
-| Regras | `IntervaloEntreComprasDoMesmoProduto` | `30` | 0–3600 (slider: 0–600) |
+| Regras | `SegundosSemEstoque` | `20` | 1–3600 |
+| Regras | `IntervaloDeVerificacao` | `1` | 0.25–60 |
+| Regras | `LimiteDeUnidades` | `0` | 0–1000 |
+| Regras | `CaixasPorPedido` | `1` | 1–50 |
+| Regras | `IntervaloEntreComprasDoMesmoProduto` | `30` | 0–3600 |
 | Regras | `ExigirPrateleiraVazia` | `false` | |
 | Regras | `SomenteComLojaAberta` | `false` | |
-| Dinheiro | `ReservaMinimaDeDinheiro` | `0` | slider: 0–20000 |
-| Dinheiro | `GastoMaximoPorDia` | `0` (sem limite) | slider: 0–50000 |
-| Painel | `PosicaoX` / `PosicaoY` | `-1` (posição padrão) | |
-| Painel | `Minimizado` | `false` | |
+| Dinheiro | `ReservaMinimaDeDinheiro` | `0` | 0–1000000 |
+| Dinheiro | `GastoMaximoPorDia` | `0` (sem limite) | 0–1000000 |
 
 ## Histórico de decisões
 
@@ -101,8 +110,9 @@ Se o jogo estiver aberto com o mod carregado, a DLL fica bloqueada e a cópia fa
 2. **v1.1.0** (`693d1e0`): o usuário pediu opções dentro do jogo. Criei uma janela IMGUI que abria com **F10**, liberava o cursor e travava a câmera pela flag PlayMaker `InOptions`. Entraram também `LimiteDeUnidades`, `IntervaloDeVerificacao` e `GastoMaximoPorDia`.
 3. **v1.2.0** (`c1f2542`): o usuário pediu o painel **dentro do Quadro de Gestão**. A tecla F10 e o código de cursor/`InOptions` foram **removidos**. O painel agora segue `tabsOBJ` e pode ser minimizado e arrastado. Depois disso também saiu a referência a `PlayMaker.dll` do `.csproj`, que tinha ficado sem uso.
 4. Os caracteres especiais (✓ ✗ ● ○ •) foram trocados por ASCII (`[OK]`, `[X]`, `-`), porque a fonte padrão do IMGUI pode não ter esses glifos.
-5. Ao instalar a versão mais nova do `ilspycmd`, o SDK 8 deu erro de formato. Por isso foi fixada a versão **8.2.0.7535**.
-6. A `LICENSE` (MIT) está no nome do usuário, que é o mesmo do `git config user.name`.
+5. **v1.3.0**: o usuário não gostou do painel IMGUI flutuando sobre o quadro e pediu **um botão dentro do quadro, como o jogo faz**. O IMGUI (`ConfigWindow.cs`) saiu; entrou a aba uGUI nativa (`BoardTab.cs`), e o `PlayMaker.dll` voltou como referência (para `FsmInt TabIndex`). Os valores usam botões -/+ com repetição ao segurar, porque o jogo não tem slider para clonar.
+6. Ao instalar a versão mais nova do `ilspycmd`, o SDK 8 deu erro de formato. Por isso foi fixada a versão **8.2.0.7535**.
+7. A `LICENSE` (MIT) está no nome do usuário, que é o mesmo do `git config user.name`.
 
 ## O que foi instalado na máquina
 
@@ -112,14 +122,9 @@ Se o jogo estiver aberto com o mod carregado, a DLL fica bloqueada e a cópia fa
 
 ## Status e próximos passos
 
-- [ ] **Nada foi testado dentro do jogo ainda.** Quando o BepInEx foi instalado, o jogo já estava aberto, então é preciso reiniciá-lo. Depois, confira no `LogOutput.log`:
-  - `AutoRestock 1.2.0 carregado`
-  - `Comprado automaticamente: ...`
-  - ou `Erro na verificação de estoque`
-- [ ] Confirmar que `tabsOBJ.activeInHierarchy` só é true com o quadro aberto. Se o painel ficar sempre visível ou nunca aparecer, ajuste `IsBoardOpen()`.
-- [ ] Confirmar que os Cmds (`CmdAlterFunds`) funcionam chamados pelo host e que as caixas aparecem na área de entrega.
-- [ ] Ideia: transformar o painel IMGUI em uma **aba nativa (uGUI)** do Quadro de Gestão. Para isso, primeiro logue a hierarquia de `tabsOBJ` e do Canvas pai em runtime (nomes, `Canvas.renderMode`, botões de aba) e depois clone um botão de aba existente.
-- [ ] Publicar no GitHub. O usuário cria o repositório e roda `git remote add origin ...` seguido de `git push -u origin main`.
+- [x] Compra automática testada no jogo (v1.2.0): o log mostrou `Comprado automaticamente: ...` para vários produtos.
+- [x] Publicado em https://github.com/TimoteoSoaresTeixeira/SupermarketTogether-AutoRestock (`origin`, branch `main`).
+- [x] Aba "Reposição" (v1.3.0) testada no jogo e aprovada pelo usuário ("tá perfeito").
 
 ## Mods parecidos (referência)
 

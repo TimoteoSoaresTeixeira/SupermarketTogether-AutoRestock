@@ -12,16 +12,15 @@ A cada intervalo de verificação (padrão: 1 segundo), o mod olha cada produto 
 3. Se essa soma ficar **no limite de unidades ou abaixo dele** (padrão: 0, ou seja, zerado) pelo tempo configurado, ele compra `CaixasPorPedido` caixas. O preço é o mesmo do tablet e o dinheiro sai do saldo da loja.
 4. Ele respeita um intervalo mínimo entre compras do mesmo produto, uma reserva mínima de dinheiro e um gasto máximo por dia.
 
-## Painel no Quadro de Gestão
+## Aba "Reposição" no Quadro de Gestão
 
-Quando você abre o **Quadro de Gestão** do jogo, o painel do AutoRestock aparece junto, encostado no lado direito da tela. Ele fecha junto com o quadro. No painel você pode:
+O mod adiciona uma aba **Reposição** à barra de botões do **Quadro de Gestão**, ao lado de "Funcionários", "Estatísticas" e "Faturas". Ela usa o mesmo visual das outras abas do jogo. Nela você pode:
 
 - ligar e desligar o mod (a tecla **F9** também faz isso, em qualquer lugar);
-- mudar o tempo, o limite de unidades, as caixas por pedido, o dinheiro e o intervalo de verificação;
-- ver o status, quanto foi gasto no dia, quais produtos estão prestes a ser comprados e as últimas compras;
-- **minimizar** o painel, se ele estiver atrapalhando o quadro, ou arrastá-lo pela barra de título.
+- ajustar o tempo, o limite de unidades, as caixas por pedido, o dinheiro e o intervalo de verificação com os botões **-** e **+** (segure para mudar rápido);
+- ver o status, quanto foi gasto no dia, quais produtos estão prestes a ser comprados e as últimas compras.
 
-As mudanças, a posição e o estado minimizado são salvos no `.cfg` quando você fecha o quadro.
+As mudanças são salvas no `.cfg` quando você sai da aba ou fecha o quadro.
 
 A compra não mexe na lista de compras do tablet.
 
