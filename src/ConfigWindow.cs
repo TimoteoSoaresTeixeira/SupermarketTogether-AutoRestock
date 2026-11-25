@@ -1,27 +1,23 @@
 ﻿using System;
 using System.Linq;
 using BepInEx.Configuration;
-using HutongGames.PlayMaker;
 using UnityEngine;
 
 namespace AutoRestock
 {
     /// <summary>
-    /// Janela IMGUI dentro do jogo para mudar as opções do AutoRestock sem editar o .cfg.
-    /// Enquanto aberta, libera o cursor e trava a câmera usando a mesma flag do menu de opções do jogo.
+    /// Painel IMGUI do AutoRestock que aparece junto com o Quadro de Gestão do jogo (ManagerBlackboard).
+    /// Abre e fecha sozinho com o quadro; o próprio quadro já libera o cursor e trava a câmera.
     /// </summary>
     internal class ConfigWindow
     {
         private const int WindowId = 0x41525354; // "ARST"
+        private const float Width = 400f;
 
         private readonly Plugin _plugin;
-        private Rect _rect = new Rect(40f, 40f, 440f, 10f);
-        private bool _open;
-
-        // Estado do jogo antes de abrir a janela, para restaurar ao fechar.
-        private bool _weSetInOptions;
-        private CursorLockMode _prevLock;
-        private bool _prevVisible;
+        private Rect _rect;
+        private bool _visible;
+        private bool _positioned;
 
         private GUIStyle _header;
         private GUIStyle _small;
@@ -31,59 +27,24 @@ namespace AutoRestock
             _plugin = plugin;
         }
 
-        public void Toggle()
+        /// <summary>Chamado todo frame pelo plugin com o estado atual do quadro de gestão.</summary>
+        public void SetBoardOpen(bool open)
         {
-            if (_open)
-                Close();
-            else
-                Open();
-        }
-
-        private void Open()
-        {
-            _open = true;
-            _prevLock = Cursor.lockState;
-            _prevVisible = Cursor.visible;
-
-            FsmBool inOptions = InOptionsVar();
-            if (inOptions != null && !inOptions.Value)
-            {
-                inOptions.Value = true;
-                _weSetInOptions = true;
-            }
-        }
-
-        public void Close()
-        {
-            if (!_open)
+            if (open == _visible)
                 return;
-            _open = false;
-            _plugin.SaveConfig();
-
-            if (_weSetInOptions)
+            _visible = open;
+            if (!open)
             {
-                FsmBool inOptions = InOptionsVar();
-                if (inOptions != null)
-                    inOptions.Value = false;
-                _weSetInOptions = false;
+                // Quadro fechou: grava posição e opções no .cfg.
+                _plugin.PanelX.Value = _rect.x;
+                _plugin.PanelY.Value = _rect.y;
+                _plugin.SaveConfig();
             }
-
-            Cursor.lockState = _prevLock;
-            Cursor.visible = _prevVisible;
-        }
-
-        public void Update()
-        {
-            if (!_open)
-                return;
-            // O jogo pode travar o cursor de novo; mantém liberado enquanto a janela estiver aberta.
-            Cursor.lockState = CursorLockMode.None;
-            Cursor.visible = true;
         }
 
         public void OnGUI()
         {
-            if (!_open)
+            if (!_visible)
                 return;
 
             if (_header == null)
@@ -92,7 +53,35 @@ namespace AutoRestock
                 _small = new GUIStyle(GUI.skin.label) { fontSize = 11, wordWrap = true };
             }
 
-            _rect = GUILayout.Window(WindowId, _rect, Draw, $"AutoRestock {Plugin.PluginVersion}", GUILayout.Width(440f));
+            if (!_positioned)
+            {
+                _positioned = true;
+                // Posição salva; se não houver, encosta no canto direito da tela.
+                float x = _plugin.PanelX.Value >= 0f ? _plugin.PanelX.Value : Screen.width - Width - 20f;
+                float y = _plugin.PanelY.Value >= 0f ? _plugin.PanelY.Value : 80f;
+                _rect = new Rect(x, y, Width, 10f);
+            }
+
+            // Mantém o painel dentro da tela (resolução pode mudar).
+            _rect.x = Mathf.Clamp(_rect.x, 0f, Mathf.Max(0f, Screen.width - _rect.width));
+            _rect.y = Mathf.Clamp(_rect.y, 0f, Mathf.Max(0f, Screen.height - 40f));
+
+            string title = $"AutoRestock - compra automática {(_plugin.Enabled.Value ? "[LIGADO]" : "[DESLIGADO]")}";
+            if (_plugin.PanelMinimized.Value)
+                _rect = GUILayout.Window(WindowId, new Rect(_rect.x, _rect.y, Width, 10f), DrawMinimized, title, GUILayout.Width(Width));
+            else
+                _rect = GUILayout.Window(WindowId, _rect, Draw, title, GUILayout.Width(Width));
+        }
+
+        private void DrawMinimized(int id)
+        {
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button(_plugin.Enabled.Value ? "Desligar" : "Ligar"))
+                _plugin.SetEnabled(!_plugin.Enabled.Value);
+            if (GUILayout.Button("Mostrar opções"))
+                _plugin.PanelMinimized.Value = false;
+            GUILayout.EndHorizontal();
+            GUI.DragWindow(new Rect(0f, 0f, 10000f, 22f));
         }
 
         private void Draw(int id)
@@ -164,11 +153,11 @@ namespace AutoRestock
             GUILayout.BeginHorizontal();
             if (GUILayout.Button("Restaurar padrões"))
                 p.ResetDefaults();
-            if (GUILayout.Button($"Fechar ({p.WindowKey.Value})"))
-                Close();
+            if (GUILayout.Button("Minimizar"))
+                p.PanelMinimized.Value = true;
             GUILayout.EndHorizontal();
 
-            GUILayout.Label($"{p.WindowKey.Value}: abre/fecha esta janela   {p.ToggleKey.Value}: liga/desliga", _small);
+            GUILayout.Label($"Arraste pela barra de título. {p.ToggleKey.Value} liga/desliga em qualquer lugar.", _small);
 
             GUI.DragWindow(new Rect(0f, 0f, 10000f, 22f));
         }
@@ -177,7 +166,7 @@ namespace AutoRestock
             string format, string suffix, string prefix = "")
         {
             GUILayout.BeginHorizontal();
-            GUILayout.Label(label, GUILayout.Width(250f));
+            GUILayout.Label(label, GUILayout.Width(230f));
             GUILayout.FlexibleSpace();
             GUILayout.Label(prefix + entry.Value.ToString(format) + suffix, GUILayout.Width(70f));
             GUILayout.EndHorizontal();
@@ -191,7 +180,7 @@ namespace AutoRestock
         private void IntSlider(string label, ConfigEntry<int> entry, int min, int max)
         {
             GUILayout.BeginHorizontal();
-            GUILayout.Label(label, GUILayout.Width(250f));
+            GUILayout.Label(label, GUILayout.Width(230f));
             GUILayout.FlexibleSpace();
             if (GUILayout.Button("-", GUILayout.Width(24f)) && entry.Value > min)
                 entry.Value--;
@@ -210,18 +199,6 @@ namespace AutoRestock
             bool v = GUILayout.Toggle(entry.Value, " " + label);
             if (v != entry.Value)
                 entry.Value = v;
-        }
-
-        private static FsmBool InOptionsVar()
-        {
-            try
-            {
-                return FsmVariables.GlobalVariables.FindFsmBool("InOptions");
-            }
-            catch
-            {
-                return null;
-            }
         }
     }
 }

@@ -1,4 +1,4 @@
-# AutoRestock: Supermarket Together
+﻿# AutoRestock: Supermarket Together
 
 Plugin BepInEx 5 para **Supermarket Together**. Ele compra caixas sozinho quando um produto fica
 **sem caixas na loja e sem nada no estoque** por um tempo seguido (padrão: **20 segundos**).
@@ -12,15 +12,16 @@ A cada intervalo de verificação (padrão: 1 segundo), o mod olha cada produto 
 3. Se essa soma ficar **no limite de unidades ou abaixo dele** (padrão: 0, ou seja, zerado) pelo tempo configurado, ele compra `CaixasPorPedido` caixas. O preço é o mesmo do tablet e o dinheiro sai do saldo da loja.
 4. Ele respeita um intervalo mínimo entre compras do mesmo produto, uma reserva mínima de dinheiro e um gasto máximo por dia.
 
-## Janela dentro do jogo
+## Painel no Quadro de Gestão
 
-Aperte **F10** durante a partida para abrir a janela de opções. Enquanto ela estiver aberta, o cursor fica livre e a câmera fica parada. Na janela você pode:
+Quando você abre o **Quadro de Gestão** do jogo, o painel do AutoRestock aparece junto, encostado no lado direito da tela. Ele fecha junto com o quadro. No painel você pode:
 
-- ligar e desligar o mod (a tecla **F9** também faz isso);
+- ligar e desligar o mod (a tecla **F9** também faz isso, em qualquer lugar);
 - mudar o tempo, o limite de unidades, as caixas por pedido, o dinheiro e o intervalo de verificação;
-- ver o status, quanto foi gasto no dia, quais produtos estão prestes a ser comprados e as últimas compras.
+- ver o status, quanto foi gasto no dia, quais produtos estão prestes a ser comprados e as últimas compras;
+- **minimizar** o painel, se ele estiver atrapalhando o quadro, ou arrastá-lo pela barra de título.
 
-As mudanças são salvas no `.cfg` quando você fecha a janela.
+As mudanças, a posição e o estado minimizado são salvos no `.cfg` quando você fecha o quadro.
 
 A compra não mexe na lista de compras do tablet.
 
@@ -41,7 +42,6 @@ O arquivo `BepInEx\config\com.autorestock.supermarkettogether.cfg` é criado na 
 |---|---|---|
 | `Ativado` | `true` | Liga/desliga o mod |
 | `TeclaLigaDesliga` | `F9` | Tecla para ligar/desligar no jogo |
-| `TeclaJanela` | `F10` | Tecla para abrir/fechar a janela de opções |
 | `SegundosSemEstoque` | `20` | Segundos seguidos abaixo do limite antes de comprar |
 | `IntervaloDeVerificacao` | `1` | De quantos em quantos segundos o estoque é conferido |
 | `LimiteDeUnidades` | `0` | Compra quando estoque + caixas ficar nesse valor ou abaixo (0 = zerado) |
