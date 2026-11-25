@@ -5,12 +5,22 @@ Plugin BepInEx 5 para **Supermarket Together**. Ele compra caixas sozinho quando
 
 ## Como funciona
 
-A cada segundo, o mod olha cada produto desbloqueado:
+A cada intervalo de verificação (padrão: 1 segundo), o mod olha cada produto desbloqueado:
 
 1. O produto precisa ter **etiqueta em alguma prateleira ou no estoque**. Assim o mod não compra produto que você não vende.
-2. Ele conta as unidades **no estoque** e **em caixas**: no chão, na mão de funcionários e na mão de jogadores. Também conta as caixas já pagas que ainda vão chegar.
-3. Se os dois ficarem em **0** pelo tempo configurado, ele compra `CaixasPorPedido` caixas. O preço é o mesmo do tablet e o dinheiro sai do saldo da loja.
-4. Ele respeita um intervalo mínimo entre compras do mesmo produto e uma reserva mínima de dinheiro.
+2. Ele soma as unidades **no estoque** e **em caixas**: no chão, na mão de funcionários e na mão de jogadores. Também entram as caixas já pagas que ainda vão chegar.
+3. Se essa soma ficar **no limite de unidades ou abaixo dele** (padrão: 0, ou seja, zerado) pelo tempo configurado, ele compra `CaixasPorPedido` caixas. O preço é o mesmo do tablet e o dinheiro sai do saldo da loja.
+4. Ele respeita um intervalo mínimo entre compras do mesmo produto, uma reserva mínima de dinheiro e um gasto máximo por dia.
+
+## Janela dentro do jogo
+
+Aperte **F10** durante a partida para abrir a janela de opções. Enquanto ela estiver aberta, o cursor fica livre e a câmera fica parada. Na janela você pode:
+
+- ligar e desligar o mod (a tecla **F9** também faz isso);
+- mudar o tempo, o limite de unidades, as caixas por pedido, o dinheiro e o intervalo de verificação;
+- ver o status, quanto foi gasto no dia, quais produtos estão prestes a ser comprados e as últimas compras.
+
+As mudanças são salvas no `.cfg` quando você fecha a janela.
 
 A compra não mexe na lista de compras do tablet.
 
@@ -31,9 +41,13 @@ O arquivo `BepInEx\config\com.autorestock.supermarkettogether.cfg` é criado na 
 |---|---|---|
 | `Ativado` | `true` | Liga/desliga o mod |
 | `TeclaLigaDesliga` | `F9` | Tecla para ligar/desligar no jogo |
-| `SegundosSemEstoque` | `20` | Segundos seguidos sem caixa e sem estoque antes de comprar |
+| `TeclaJanela` | `F10` | Tecla para abrir/fechar a janela de opções |
+| `SegundosSemEstoque` | `20` | Segundos seguidos abaixo do limite antes de comprar |
+| `IntervaloDeVerificacao` | `1` | De quantos em quantos segundos o estoque é conferido |
+| `LimiteDeUnidades` | `0` | Compra quando estoque + caixas ficar nesse valor ou abaixo (0 = zerado) |
 | `CaixasPorPedido` | `1` | Caixas compradas por vez |
 | `ReservaMinimaDeDinheiro` | `0` | Não compra se o saldo ficar abaixo disso |
+| `GastoMaximoPorDia` | `0` | Limite de gasto automático por dia do jogo (0 = sem limite) |
 | `IntervaloEntreComprasDoMesmoProduto` | `30` | Segundos mínimos entre compras do mesmo produto |
 | `ExigirPrateleiraVazia` | `false` | Só compra se a prateleira também estiver vazia |
 | `SomenteComLojaAberta` | `false` | Só compra com a loja aberta |

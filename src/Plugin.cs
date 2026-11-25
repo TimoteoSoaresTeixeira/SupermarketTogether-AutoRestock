@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using BepInEx;
 using BepInEx.Configuration;
@@ -10,32 +10,36 @@ using UnityEngine;
 namespace AutoRestock
 {
     /// <summary>
-    /// Compra caixas automaticamente quando um produto fica sem unidades no estoque (storage)
-    /// e sem caixas soltas na loja por um tempo configurável (padrão 20 s).
-    /// Só roda no host / single-player, porque a compra é processada pelo servidor.
+    /// Compra caixas automaticamente quando um produto fica sem estoque (storage) e sem caixas na loja
+    /// por um tempo configurável. Só roda no host / single-player, porque a compra é processada pelo servidor.
     /// </summary>
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
     public class Plugin : BaseUnityPlugin
     {
         public const string PluginGuid = "com.autorestock.supermarkettogether";
         public const string PluginName = "AutoRestock";
-        public const string PluginVersion = "1.0.0";
+        public const string PluginVersion = "1.1.0";
 
         // Índices de ManagerBlackboard.dummyArrayExistences (mesma ordem usada pelo tablet do jogo).
         private const int ShelvesIndex = 0;
         private const int StorageIndex = 1;
         private const int BoxesIndex = 2;
+        private const int MaxHistory = 6;
 
         internal static ManualLogSource Log;
 
-        private ConfigEntry<bool> _enabled;
-        private ConfigEntry<KeyboardShortcut> _toggleKey;
-        private ConfigEntry<float> _emptySeconds;
-        private ConfigEntry<int> _boxesPerOrder;
-        private ConfigEntry<float> _minFundsReserve;
-        private ConfigEntry<float> _cooldownSeconds;
-        private ConfigEntry<bool> _requireEmptyShelves;
-        private ConfigEntry<bool> _onlyWhenStoreOpen;
+        internal ConfigEntry<bool> Enabled;
+        internal ConfigEntry<KeyboardShortcut> ToggleKey;
+        internal ConfigEntry<KeyboardShortcut> WindowKey;
+        internal ConfigEntry<float> EmptySeconds;
+        internal ConfigEntry<float> CheckInterval;
+        internal ConfigEntry<int> StockThreshold;
+        internal ConfigEntry<int> BoxesPerOrder;
+        internal ConfigEntry<float> MinFundsReserve;
+        internal ConfigEntry<float> MaxSpendPerDay;
+        internal ConfigEntry<float> CooldownSeconds;
+        internal ConfigEntry<bool> RequireEmptyShelves;
+        internal ConfigEntry<bool> OnlyWhenStoreOpen;
 
         private static readonly AccessTools.FieldRef<ManagerBlackboard, GameObject[]> ExistencesRef =
             AccessTools.FieldRefAccess<ManagerBlackboard, GameObject[]>("dummyArrayExistences");
@@ -44,152 +48,224 @@ namespace AutoRestock
             AccessTools.MethodDelegate<Func<ManagerBlackboard, int, float>>(
                 AccessTools.Method(typeof(ManagerBlackboard), "PricePerBoxRetrieve"));
 
-        // productID -> Time.time em que o produto foi visto zerado pela primeira vez (sequência atual).
-        private readonly Dictionary<int, float> _emptySince = new Dictionary<int, float>();
-        // productID -> Time.time da última compra automática.
+        // productID -> Time.time em que o produto entrou abaixo do limite (sequência atual).
+        internal readonly Dictionary<int, float> EmptySince = new Dictionary<int, float>();
         private readonly Dictionary<int, float> _lastPurchase = new Dictionary<int, float>();
-        // productID -> Time.time do último aviso de "sem dinheiro" (para não lotar o log).
         private readonly Dictionary<int, float> _lastNoFundsWarning = new Dictionary<int, float>();
 
         private readonly Dictionary<int, int> _shelves = new Dictionary<int, int>();
         private readonly Dictionary<int, int> _storage = new Dictionary<int, int>();
         private readonly Dictionary<int, int> _boxes = new Dictionary<int, int>();
-        private readonly Dictionary<int, int> _pending = new Dictionary<int, int>();
+        private readonly Dictionary<int, int> _pendingBoxes = new Dictionary<int, int>();
         private readonly HashSet<int> _labeled = new HashSet<int>();
 
+        internal readonly List<string> History = new List<string>();
+        internal float SpentToday;
+        internal int BoxesToday;
+        internal string Status = "Aguardando partida...";
+
+        private int _currentDay = -1;
         private float _nextCheck;
         private bool _inputBroken;
         private bool _loggedScanError;
+        private ConfigWindow _window;
 
         private void Awake()
         {
             Log = Logger;
+            // Evita gravar o arquivo a cada movimento de slider; a janela salva ao fechar.
+            Config.SaveOnConfigSet = false;
 
-            _enabled = Config.Bind("Geral", "Ativado", true,
+            Enabled = Config.Bind("Geral", "Ativado", true,
                 "Liga/desliga a compra automática.");
-            _toggleKey = Config.Bind("Geral", "TeclaLigaDesliga", new KeyboardShortcut(KeyCode.F9),
+            ToggleKey = Config.Bind("Geral", "TeclaLigaDesliga", new KeyboardShortcut(KeyCode.F9),
                 "Tecla para ligar/desligar durante o jogo.");
-            _emptySeconds = Config.Bind("Regras", "SegundosSemEstoque", 20f,
-                new ConfigDescription("Quantos segundos seguidos o produto precisa ficar sem caixas e sem estoque antes de comprar.",
+            WindowKey = Config.Bind("Geral", "TeclaJanela", new KeyboardShortcut(KeyCode.F10),
+                "Tecla para abrir/fechar a janela de opções dentro do jogo.");
+            EmptySeconds = Config.Bind("Regras", "SegundosSemEstoque", 20f,
+                new ConfigDescription("Quantos segundos seguidos o produto precisa ficar abaixo do limite antes de comprar.",
                     new AcceptableValueRange<float>(1f, 3600f)));
-            _boxesPerOrder = Config.Bind("Regras", "CaixasPorPedido", 1,
+            CheckInterval = Config.Bind("Regras", "IntervaloDeVerificacao", 1f,
+                new ConfigDescription("De quantos em quantos segundos o mod confere o estoque.",
+                    new AcceptableValueRange<float>(0.25f, 60f)));
+            StockThreshold = Config.Bind("Regras", "LimiteDeUnidades", 0,
+                new ConfigDescription("Compra quando (estoque + caixas + caixas a caminho) tiver esta quantidade de unidades ou menos. 0 = só quando zerar.",
+                    new AcceptableValueRange<int>(0, 1000)));
+            BoxesPerOrder = Config.Bind("Regras", "CaixasPorPedido", 1,
                 new ConfigDescription("Quantas caixas comprar de cada vez.", new AcceptableValueRange<int>(1, 50)));
-            _minFundsReserve = Config.Bind("Regras", "ReservaMinimaDeDinheiro", 0f,
-                "Não compra se o saldo ficar abaixo deste valor depois da compra.");
-            _cooldownSeconds = Config.Bind("Regras", "IntervaloEntreComprasDoMesmoProduto", 30f,
+            MinFundsReserve = Config.Bind("Dinheiro", "ReservaMinimaDeDinheiro", 0f,
+                new ConfigDescription("Não compra se o saldo ficar abaixo deste valor depois da compra.",
+                    new AcceptableValueRange<float>(0f, 1000000f)));
+            MaxSpendPerDay = Config.Bind("Dinheiro", "GastoMaximoPorDia", 0f,
+                new ConfigDescription("Limite de gasto automático por dia do jogo. 0 = sem limite.",
+                    new AcceptableValueRange<float>(0f, 1000000f)));
+            CooldownSeconds = Config.Bind("Regras", "IntervaloEntreComprasDoMesmoProduto", 30f,
                 new ConfigDescription("Tempo mínimo (segundos) entre duas compras automáticas do mesmo produto.",
                     new AcceptableValueRange<float>(0f, 3600f)));
-            _requireEmptyShelves = Config.Bind("Regras", "ExigirPrateleiraVazia", false,
+            RequireEmptyShelves = Config.Bind("Regras", "ExigirPrateleiraVazia", false,
                 "Se true, só compra quando o produto também estiver zerado nas prateleiras.");
-            _onlyWhenStoreOpen = Config.Bind("Regras", "SomenteComLojaAberta", false,
+            OnlyWhenStoreOpen = Config.Bind("Regras", "SomenteComLojaAberta", false,
                 "Se true, só compra enquanto a loja estiver aberta.");
 
-            Log.LogInfo($"{PluginName} {PluginVersion} carregado. Tecla: {_toggleKey.Value}. Ativado: {_enabled.Value}");
+            _window = new ConfigWindow(this);
+
+            Log.LogInfo($"{PluginName} {PluginVersion} carregado. Janela: {WindowKey.Value} | Liga/desliga: {ToggleKey.Value} | Ativado: {Enabled.Value}");
         }
 
         private void Update()
         {
-            HandleToggle();
+            HandleKeys();
+            _window.Update();
 
             if (Time.time < _nextCheck)
                 return;
-            _nextCheck = Time.time + 1f;
-
-            if (!_enabled.Value)
-                return;
+            _nextCheck = Time.time + CheckInterval.Value;
 
             try
             {
                 Check();
+                _loggedScanError = false;
             }
             catch (Exception e)
             {
+                Status = "Erro na verificação (veja o log)";
                 if (!_loggedScanError)
                 {
                     _loggedScanError = true;
-                    Log.LogError($"Erro na verificação de estoque (só será mostrado uma vez): {e}");
+                    Log.LogError($"Erro na verificação de estoque: {e}");
                 }
             }
         }
 
-        private void HandleToggle()
+        private void OnGUI() => _window.OnGUI();
+
+        private void OnDestroy() => _window?.Close();
+
+        private void HandleKeys()
         {
             if (_inputBroken)
                 return;
             try
             {
-                if (_toggleKey.Value.IsDown())
-                {
-                    _enabled.Value = !_enabled.Value;
-                    _emptySince.Clear();
-                    Log.LogMessage($"AutoRestock {(_enabled.Value ? "LIGADO" : "DESLIGADO")}");
-                }
+                if (ToggleKey.Value.IsDown())
+                    SetEnabled(!Enabled.Value);
+                if (WindowKey.Value.IsDown())
+                    _window.Toggle();
             }
             catch (InvalidOperationException)
             {
-                // Jogo configurado só com o novo Input System: desativa a tecla, a config continua valendo.
+                // Jogo configurado só com o novo Input System: teclas desativadas, a config continua valendo.
                 _inputBroken = true;
-                Log.LogWarning("Input legado indisponível; use o arquivo de configuração para ligar/desligar.");
+                Log.LogWarning("Input legado indisponível; use o arquivo de configuração.");
             }
+        }
+
+        internal void SetEnabled(bool value)
+        {
+            Enabled.Value = value;
+            EmptySince.Clear();
+            Config.Save();
+            Log.LogMessage($"AutoRestock {(value ? "LIGADO" : "DESLIGADO")}");
+        }
+
+        internal void SaveConfig() => Config.Save();
+
+        internal void ResetDefaults()
+        {
+            foreach (ConfigEntryBase entry in new ConfigEntryBase[]
+                     {
+                         EmptySeconds, CheckInterval, StockThreshold, BoxesPerOrder, MinFundsReserve,
+                         MaxSpendPerDay, CooldownSeconds, RequireEmptyShelves, OnlyWhenStoreOpen
+                     })
+            {
+                entry.BoxedValue = entry.DefaultValue;
+            }
+            Config.Save();
         }
 
         private void Check()
         {
-            // A compra é processada pelo servidor: só o host (ou single-player) roda o mod.
             if (!NetworkServer.active)
+            {
+                Status = NetworkClient.active
+                    ? "Inativo: só funciona para quem hospeda a partida"
+                    : "Aguardando partida...";
+                EmptySince.Clear();
                 return;
+            }
 
             GameData gameData = GameData.Instance;
             ProductListing listing = ProductListing.Instance;
-            if (gameData == null || listing == null)
-                return;
-
-            ManagerBlackboard blackboard = gameData.GetComponent<ManagerBlackboard>();
-            if (blackboard == null)
-                return;
-
-            if (_onlyWhenStoreOpen.Value && !gameData.isSupermarketOpen)
+            ManagerBlackboard blackboard = gameData != null ? gameData.GetComponent<ManagerBlackboard>() : null;
+            if (gameData == null || listing == null || blackboard == null)
             {
-                _emptySince.Clear();
+                Status = "Aguardando partida...";
+                return;
+            }
+
+            if (gameData.gameDay != _currentDay)
+            {
+                _currentDay = gameData.gameDay;
+                SpentToday = 0f;
+                BoxesToday = 0;
+            }
+
+            if (!Enabled.Value)
+            {
+                Status = "Desligado";
+                EmptySince.Clear();
+                return;
+            }
+
+            if (OnlyWhenStoreOpen.Value && !gameData.isSupermarketOpen)
+            {
+                Status = "Pausado: loja fechada";
+                EmptySince.Clear();
                 return;
             }
 
             if (!ScanExistences(blackboard))
                 return;
 
+            Status = "Ativo";
             float now = Time.time;
+            int threshold = StockThreshold.Value;
+
             foreach (int productId in listing.availableProducts)
             {
-                // Só considera produtos que têm etiqueta em alguma prateleira ou estoque,
+                // Só considera produtos com etiqueta em alguma prateleira ou estoque,
                 // senão o mod compraria todo produto desbloqueado que você nunca vende.
-                bool outOfStock = _labeled.Contains(productId)
-                                  && Get(_storage, productId) == 0
-                                  && Get(_boxes, productId) == 0
-                                  && Get(_pending, productId) == 0
-                                  && (!_requireEmptyShelves.Value || Get(_shelves, productId) == 0);
-
-                if (!outOfStock)
+                bool needsRestock = false;
+                if (_labeled.Contains(productId))
                 {
-                    _emptySince.Remove(productId);
+                    int perBox = listing.productsData[productId].maxItemsPerBox;
+                    int units = Get(_storage, productId) + Get(_boxes, productId) + Get(_pendingBoxes, productId) * perBox;
+                    needsRestock = units <= threshold
+                                   && (!RequireEmptyShelves.Value || Get(_shelves, productId) == 0);
+                }
+
+                if (!needsRestock)
+                {
+                    EmptySince.Remove(productId);
                     continue;
                 }
 
-                if (!_emptySince.TryGetValue(productId, out float since))
+                if (!EmptySince.TryGetValue(productId, out float since))
                 {
-                    _emptySince[productId] = now;
+                    EmptySince[productId] = now;
                     continue;
                 }
 
-                if (now - since < _emptySeconds.Value)
+                if (now - since < EmptySeconds.Value)
                     continue;
 
-                if (_lastPurchase.TryGetValue(productId, out float last) && now - last < _cooldownSeconds.Value)
+                if (_lastPurchase.TryGetValue(productId, out float last) && now - last < CooldownSeconds.Value)
                     continue;
 
-                if (TryBuy(gameData, blackboard, listing, productId, now))
+                if (TryBuy(gameData, blackboard, productId, now))
                 {
                     _lastPurchase[productId] = now;
-                    _emptySince.Remove(productId);
+                    EmptySince.Remove(productId);
                 }
             }
         }
@@ -203,7 +279,7 @@ namespace AutoRestock
             _shelves.Clear();
             _storage.Clear();
             _boxes.Clear();
-            _pending.Clear();
+            _pendingBoxes.Clear();
             _labeled.Clear();
 
             GameObject[] roots = ExistencesRef(blackboard);
@@ -249,7 +325,7 @@ namespace AutoRestock
             if (blackboard.idsToSpawn != null)
             {
                 foreach (int id in blackboard.idsToSpawn)
-                    Add(_pending, id, 1);
+                    Add(_pendingBoxes, id, 1);
             }
 
             return true;
@@ -279,21 +355,28 @@ namespace AutoRestock
             }
         }
 
-        private bool TryBuy(GameData gameData, ManagerBlackboard blackboard, ProductListing listing, int productId, float now)
+        private bool TryBuy(GameData gameData, ManagerBlackboard blackboard, int productId, float now)
         {
-            int boxes = _boxesPerOrder.Value;
+            int boxes = BoxesPerOrder.Value;
             float total = PricePerBox(blackboard, productId) * boxes;
             if (total <= 0f)
                 return false;
 
             string name = ProductName(productId);
 
-            if (gameData.gameFunds - total < _minFundsReserve.Value)
+            string blocked = null;
+            if (gameData.gameFunds - total < MinFundsReserve.Value)
+                blocked = $"sem dinheiro (precisa ${total:0.00}, saldo ${gameData.gameFunds:0.00}, reserva ${MinFundsReserve.Value:0})";
+            else if (MaxSpendPerDay.Value > 0f && SpentToday + total > MaxSpendPerDay.Value)
+                blocked = $"limite diário atingido (gasto ${SpentToday:0.00} de ${MaxSpendPerDay.Value:0})";
+
+            if (blocked != null)
             {
                 if (!_lastNoFundsWarning.TryGetValue(productId, out float warned) || now - warned > 60f)
                 {
                     _lastNoFundsWarning[productId] = now;
-                    Log.LogWarning($"Sem dinheiro para repor {name}: precisa ${total:0.00}, saldo ${gameData.gameFunds:0.00}, reserva ${_minFundsReserve.Value:0.00}");
+                    Log.LogWarning($"Não comprou {name}: {blocked}");
+                    AddHistory($"[X] {name}: {blocked}");
                 }
                 return false;
             }
@@ -306,11 +389,29 @@ namespace AutoRestock
             gameData.CmdAlterFunds(-total);
             gameData.CmdmoneySpentOnProducts(total);
 
+            SpentToday += total;
+            BoxesToday += boxes;
             Log.LogMessage($"Comprado automaticamente: {boxes}x caixa de {name} (ID {productId}) por ${total:0.00}");
+            AddHistory($"[OK] {boxes}x {name}  ${total:0.00}");
             return true;
         }
 
-        private static string ProductName(int productId)
+        private void AddHistory(string line)
+        {
+            string time = GameData.Instance != null ? FormatHour(GameData.Instance.timeOfDay) : "--:--";
+            History.Insert(0, $"[{time}] {line}");
+            if (History.Count > MaxHistory)
+                History.RemoveAt(History.Count - 1);
+        }
+
+        private static string FormatHour(float timeOfDay)
+        {
+            int h = Mathf.FloorToInt(timeOfDay);
+            int m = (int)((timeOfDay - h) * 60f);
+            return $"{h:00}:{m:00}";
+        }
+
+        internal static string ProductName(int productId)
         {
             try
             {
@@ -323,7 +424,7 @@ namespace AutoRestock
             }
             catch
             {
-                // Nome é só para o log; ignora falhas de localização.
+                // Nome é só para exibição; ignora falhas de localização.
             }
             return "produto " + productId;
         }
